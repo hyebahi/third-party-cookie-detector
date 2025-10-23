@@ -373,7 +373,11 @@ function App() {
                             <td className="website-cell">
                               <span className="website-url">{cookie.website || cookie.scan_url}</span>
                             </td>
-                            <td className="cookie-name">{cookie.name}</td>
+                            <td className="cookie-name" title={cookie.name}>
+                              {cookie.name.length > 25
+                                ? cookie.name.substring(0, 25) + '...'
+                                : cookie.name}
+                            </td>
                             <td className="cookie-value" title={cookie.value}>
                               {cookie.value.length > 30
                                 ? cookie.value.substring(0, 30) + '...'

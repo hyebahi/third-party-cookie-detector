@@ -829,7 +829,7 @@ class CookieScanner {
             timestamp: log.ts || Date.now()
           });
 
-          console.log(`[JS Cookie Debug] Added cookie with finalThirdPartyDomain: ${finalThirdPartyDomain || null}`);
+          console.log(`[JS Cookie Debug] Added cookie with thirdPartyDomain: ${thirdPartyDomain || null}`);
         }
       } else {
         // Handle cookieStore.set and other operations

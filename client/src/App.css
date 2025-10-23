@@ -743,4 +743,20 @@ body {
     flex: 1;
     justify-content: center;
   }
+}/* 
+Cookie name column styling */
+.cookie-name {
+  font-family: monospace;
+  font-weight: bold;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Ensure cookie name column doesn't expand too much */
+.cookies-table th:nth-child(2),
+.cookies-table td:nth-child(2) {
+  width: 200px;
+  max-width: 200px;
 }
