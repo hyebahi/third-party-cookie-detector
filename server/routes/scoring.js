@@ -5,17 +5,36 @@ const db = require('../database/db');
 const router = express.Router();
 const cookieScoring = new CookieScoring();
 
-// Get scored cookies for a specific website
+// Get scored cookies for a specific website or pattern
 router.get('/website', async (req, res) => {
   try {
     const { url } = req.query;
-    
+
     if (!url) {
       return res.status(400).json({ error: 'URL parameter is required' });
     }
 
-    const scoredData = await cookieScoring.scoreWebsiteCookies(url);
-    
+    // Check if the URL contains wildcard characters
+    const hasWildcards = url.includes('*') || url.includes('%') || url.includes('?');
+
+    console.log(`[Website Route] URL: "${url}", hasWildcards: ${hasWildcards}`);
+
+    let scoredData;
+    if (hasWildcards) {
+      console.log(`[Website Route] Using pattern matching for: ${url}`);
+      // Use pattern matching for wildcards
+      scoredData = await cookieScoring.scoreWebsitePattern(url);
+      console.log(`[Website Route] Pattern result:`, {
+        pattern: scoredData.pattern,
+        cookieCount: scoredData.cookies?.length || 0,
+        websiteCount: scoredData.websites?.length || 0
+      });
+    } else {
+      console.log(`[Website Route] Using exact matching for: ${url}`);
+      // Use exact matching for specific websites
+      scoredData = await cookieScoring.scoreWebsiteCookies(url);
+    }
+
     res.json(scoredData);
 
   } catch (error) {
@@ -28,7 +47,7 @@ router.get('/website', async (req, res) => {
 router.get('/global', async (req, res) => {
   try {
     const globalStats = await cookieScoring.getGlobalCookieStats();
-    
+
     res.json({
       cookies: globalStats,
       summary: {
@@ -37,7 +56,7 @@ router.get('/global', async (req, res) => {
         mediumConfidence: globalStats.filter(c => c.scoring.confidence === 'medium').length,
         lowConfidence: globalStats.filter(c => c.scoring.confidence === 'low').length,
         thirdParty: globalStats.filter(c => c.thirdPartyRatio > 50).length,
-        averageScore: globalStats.reduce((sum, c) => sum + c.scoring.score, 0) / globalStats.length
+        averageScore: globalStats.length > 0 ? globalStats.reduce((sum, c) => sum + c.scoring.score, 0) / globalStats.length : 0
       }
     });
 
@@ -51,7 +70,7 @@ router.get('/global', async (req, res) => {
 router.get('/cookie/:cookieName', async (req, res) => {
   try {
     const { cookieName } = req.params;
-    
+
     // Get all instances of this cookie across websites
     const query = `
       SELECT 
@@ -67,7 +86,7 @@ router.get('/cookie/:cookieName', async (req, res) => {
       WHERE cookie_name = ?
       ORDER BY updated_at DESC
     `;
-    
+
     const instances = await new Promise((resolve, reject) => {
       db.db.all(query, [cookieName], (err, rows) => {
         if (err) reject(err);
@@ -81,9 +100,9 @@ router.get('/cookie/:cookieName', async (req, res) => {
 
     // Calculate attribution first to get the primary origin
     // For third-party cookies, use third_party_domain as the attribution source
-    const attribution = cookieScoring.calculateAttributionProbability(
-      cookieName, 
-      instances.map(i => ({ 
+    const attribution = await cookieScoring.calculateAttributionProbability(
+      cookieName,
+      instances.map(i => ({
         origin: i.origin,
         thirdPartyDomain: i.third_party_domain,
         isThirdParty: i.third_party
@@ -99,8 +118,8 @@ router.get('/cookie/:cookieName', async (req, res) => {
       origin: attribution.primaryOrigin || instances[0].origin
     };
 
-    const scoring = cookieScoring.calculateCookieScore(mockCookie, { count: instances.length });
-    
+    const scoring = await cookieScoring.calculateCookieScore(mockCookie, { count: instances.length });
+
     // Override the originDomain with the primary attribution
     scoring.originDomain = attribution.primaryOrigin || cookieScoring.extractDomainFromOrigin(instances[0].origin) || 'unknown';
 
@@ -121,7 +140,7 @@ router.get('/cookie/:cookieName', async (req, res) => {
       } else {
         domain = cookieScoring.extractDomainFromOrigin(instance.origin) || 'unknown';
       }
-      
+
       if (!acc[domain]) {
         acc[domain] = [];
       }
@@ -157,11 +176,11 @@ router.get('/top-trackers', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 20;
     const globalStats = await cookieScoring.getGlobalCookieStats();
-    
+
     // Filter for likely tracking cookies and sort by score
     const trackingCookies = globalStats
-      .filter(cookie => 
-        cookie.scoring.confidence !== 'low' || 
+      .filter(cookie =>
+        cookie.scoring.confidence !== 'low' ||
         cookie.thirdPartyRatio > 50
       )
       .sort((a, b) => b.scoring.score - a.scoring.score)
@@ -173,7 +192,7 @@ router.get('/top-trackers', async (req, res) => {
         total: trackingCookies.length,
         highConfidence: trackingCookies.filter(c => c.scoring.confidence === 'high').length,
         thirdParty: trackingCookies.filter(c => c.thirdPartyRatio > 50).length,
-        averageScore: trackingCookies.reduce((sum, c) => sum + c.scoring.score, 0) / trackingCookies.length
+        averageScore: trackingCookies.length > 0 ? trackingCookies.reduce((sum, c) => sum + c.scoring.score, 0) / trackingCookies.length : 0
       }
     });
 
@@ -187,7 +206,7 @@ router.get('/top-trackers', async (req, res) => {
 router.post('/recalculate', async (req, res) => {
   try {
     console.log('Starting cookie score recalculation...');
-    
+
     const globalStats = await cookieScoring.getGlobalCookieStats();
     let updated = 0;
 
@@ -208,7 +227,7 @@ router.post('/recalculate', async (req, res) => {
     }
 
     console.log(`Cookie score recalculation completed. Updated ${updated} cookies.`);
-    
+
     res.json({
       message: 'Score recalculation completed',
       updated,
@@ -221,11 +240,80 @@ router.post('/recalculate', async (req, res) => {
   }
 });
 
+// Test pattern matching directly
+router.get('/test-pattern', async (req, res) => {
+  try {
+    const { pattern } = req.query;
+
+    if (!pattern) {
+      return res.status(400).json({ error: 'Pattern parameter is required' });
+    }
+
+    console.log(`[Test Pattern] Testing pattern: "${pattern}"`);
+
+    const cookies = await db.getCookiesByWebsitePattern(pattern);
+
+    console.log(`[Test Pattern] Found ${cookies.length} cookies`);
+
+    const websites = [...new Set(cookies.map(c => c.website))];
+
+    res.json({
+      pattern,
+      sqlPattern: pattern.replace(/\*/g, '%').replace(/\?/g, '_'),
+      cookieCount: cookies.length,
+      websiteCount: websites.length,
+      websites: websites.slice(0, 10), // First 10 websites
+      sampleCookies: cookies.slice(0, 5).map(c => ({ name: c.name, website: c.website }))
+    });
+
+  } catch (error) {
+    console.error('Error testing pattern:', error);
+    res.status(500).json({ error: 'Failed to test pattern', details: error.message });
+  }
+});
+
+// Get list of available websites for debugging
+router.get('/websites', async (req, res) => {
+  try {
+    const { search } = req.query;
+
+    let query = `
+      SELECT DISTINCT website, COUNT(*) as cookie_count
+      FROM cookies 
+    `;
+    let params = [];
+
+    if (search) {
+      query += ` WHERE website LIKE ? `;
+      params.push(`%${search}%`);
+    }
+
+    query += ` GROUP BY website ORDER BY website`;
+
+    const websites = await new Promise((resolve, reject) => {
+      db.db.all(query, params, (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+
+    res.json({
+      websites: websites,
+      total: websites.length,
+      search: search || null
+    });
+
+  } catch (error) {
+    console.error('Error getting websites list:', error);
+    res.status(500).json({ error: 'Failed to get websites list' });
+  }
+});
+
 // Get scoring summary statistics
 router.get('/summary', async (req, res) => {
   try {
     const globalStats = await cookieScoring.getGlobalCookieStats();
-    
+
     const summary = {
       totalCookies: globalStats.length,
       confidenceLevels: {
@@ -234,7 +322,7 @@ router.get('/summary', async (req, res) => {
         low: globalStats.filter(c => c.scoring.confidence === 'low').length
       },
       thirdParty: globalStats.filter(c => c.thirdPartyRatio > 50).length,
-      averageScore: globalStats.reduce((sum, c) => sum + c.scoring.score, 0) / globalStats.length,
+      averageScore: globalStats.length > 0 ? globalStats.reduce((sum, c) => sum + c.scoring.score, 0) / globalStats.length : 0,
       scoreDistribution: {
         veryHigh: globalStats.filter(c => c.scoring.score >= 10).length,
         high: globalStats.filter(c => c.scoring.score >= 8 && c.scoring.score < 10).length,

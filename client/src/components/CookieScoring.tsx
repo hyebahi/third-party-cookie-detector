@@ -36,7 +36,9 @@ interface ScoredCookie {
 }
 
 interface ScoringData {
-  website: string;
+  website?: string;
+  pattern?: string;
+  websites?: string[];
   cookies: ScoredCookie[];
   summary: {
     total: number;
@@ -45,6 +47,7 @@ interface ScoringData {
     lowConfidence: number;
     thirdParty: number;
     averageScore: number;
+    websiteCount?: number;
   };
 }
 
@@ -109,7 +112,7 @@ const CookieScoringComponent: React.FC = () => {
       setLoading(true);
       setError('');
       setSuccessMessage('');
-      
+
       let url = websiteUrl;
       if (!url.startsWith('http://') && !url.startsWith('https://')) {
         url = 'https://' + url;
@@ -117,7 +120,7 @@ const CookieScoringComponent: React.FC = () => {
 
       const response = await fetch(`/api/scoring/website?url=${encodeURIComponent(url)}`);
       if (!response.ok) throw new Error('Failed to fetch website scoring');
-      
+
       const data = await response.json();
       setWebsiteScoring(data);
       setActiveTab('website');
@@ -142,13 +145,13 @@ const CookieScoringComponent: React.FC = () => {
       });
 
       if (!response.ok) throw new Error('Failed to recalculate scores');
-      
+
       const result = await response.json();
       setSuccessMessage(`✅ Recalculated scores for ${result.updated} cookies`);
-      
+
       // Refresh the global scoring data
       await fetchGlobalScoring();
-      
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to recalculate scores');
     } finally {
@@ -188,11 +191,11 @@ const CookieScoringComponent: React.FC = () => {
             type="text"
             value={websiteUrl}
             onChange={(e) => setWebsiteUrl(e.target.value)}
-            placeholder="Enter website URL to analyze (e.g., trustarc.com)"
+            placeholder="Enter website URL or pattern (e.g., trustarc.com, *.trustarc.com, %google%)"
             className="website-input"
             onKeyPress={(e) => e.key === 'Enter' && fetchWebsiteScoring()}
           />
-          <button 
+          <button
             onClick={fetchWebsiteScoring}
             disabled={loading}
             className="analyze-button"
@@ -200,13 +203,16 @@ const CookieScoringComponent: React.FC = () => {
             {loading ? '🔍 Analyzing...' : '📊 Analyze Website'}
           </button>
         </div>
+        <div className="wildcard-help">
+          <small>💡 Use wildcards: <code>*</code> for any characters, <code>%</code> for SQL-style matching. Examples: <code>*.example.com</code>, <code>%google%</code></small>
+        </div>
         {error && <div className="error-message">{error}</div>}
         {successMessage && <div className="success-message">{successMessage}</div>}
       </div>
 
       {/* Recalculate Button */}
       <div className="recalculate-section">
-        <button 
+        <button
           onClick={recalculateScores}
           disabled={recalculating}
           className="recalculate-button"
@@ -221,13 +227,13 @@ const CookieScoringComponent: React.FC = () => {
 
       {/* Tab Navigation */}
       <div className="tab-navigation">
-        <button 
+        <button
           className={`tab-button ${activeTab === 'global' ? 'active' : ''}`}
           onClick={() => setActiveTab('global')}
         >
           Global Cookie Stats
         </button>
-        <button 
+        <button
           className={`tab-button ${activeTab === 'website' ? 'active' : ''}`}
           onClick={() => setActiveTab('website')}
           disabled={!websiteScoring}
@@ -265,7 +271,7 @@ const CookieScoringComponent: React.FC = () => {
                 <div className="card-label">Under Analysis</div>
               </div>
               <div className="summary-card">
-                <div className="card-number">{globalScoring.summary.averageScore.toFixed(1)}</div>
+                <div className="card-number">{globalScoring.summary.averageScore ? globalScoring.summary.averageScore.toFixed(1) : '0.0'}</div>
                 <div className="card-label">Average Score</div>
               </div>
             </div>
@@ -278,48 +284,40 @@ const CookieScoringComponent: React.FC = () => {
                 <thead>
                   <tr>
                     <th>Cookie Name</th>
-                    <th>Score</th>
-                    <th>Confidence</th>
+                    <th className="tooltip-header" title="Score based on detection method (JS=3, HTTP=1, Browser=0.5) + third-party bonus (+2) + pattern bonus + occurrence multiplier">Score</th>
+                    <th className="tooltip-header" title="High: Score ≥8 or pattern match with score ≥5 | Medium: Score ≥4 or pattern match with score ≥2 | Low: All others">Confidence</th>
                     <th>Origin Domain</th>
-                    <th>Occurrences</th>
-                    <th>Websites</th>
-                    <th>Third-Party %</th>
+                    <th className="tooltip-header" title="Percentage of times this cookie was detected as third-party across all occurrences. 100% = always third-party, 0% = always first-party">Third-Party %</th>
                   </tr>
                 </thead>
                 <tbody>
                   {globalScoring.cookies
                     .sort((a, b) => b.scoring.score - a.scoring.score)
                     .map((cookie, index) => (
-                    <tr key={cookie.cookieName} className={`confidence-${cookie.scoring.confidence}`}>
-                      <td className="cookie-name-cell">
-                        <strong>{cookie.cookieName}</strong>
-                      </td>
-                      <td className="score-cell">
-                        <div className="score-badge" style={{ backgroundColor: getConfidenceColor(cookie.scoring.confidence) }}>
-                          {cookie.scoring.score}
-                        </div>
-                      </td>
-                      <td className="confidence-cell">
-                        <span className={`confidence-badge ${cookie.scoring.confidence}`}>
-                          {getConfidenceLabel(cookie.scoring.confidence)}
-                        </span>
-                      </td>
-                      <td className="origin-cell">
-                        {cookie.scoring.originDomain}
-                      </td>
-                      <td className="occurrences-cell">
-                        {cookie.totalOccurrences}
-                      </td>
-                      <td className="websites-cell">
-                        {cookie.websiteCount}
-                      </td>
-                      <td className="third-party-cell">
-                        <span className={`percentage ${cookie.thirdPartyRatio > 50 ? 'high' : 'low'}`}>
-                          {cookie.thirdPartyRatio}%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                      <tr key={cookie.cookieName}>
+                        <td className="cookie-name-cell">
+                          <strong>{cookie.cookieName}</strong>
+                        </td>
+                        <td className="score-cell">
+                          <div className="score-badge" style={{ backgroundColor: getConfidenceColor(cookie.scoring.confidence) }}>
+                            {cookie.scoring.score}
+                          </div>
+                        </td>
+                        <td className="confidence-cell">
+                          <span className={`confidence-badge ${cookie.scoring.confidence}`}>
+                            {getConfidenceLabel(cookie.scoring.confidence)}
+                          </span>
+                        </td>
+                        <td className="origin-cell">
+                          {cookie.scoring.originDomain}
+                        </td>
+                        <td className="third-party-cell">
+                          <span className={`percentage ${cookie.thirdPartyRatio > 50 ? 'high' : 'low'}`}>
+                            {cookie.thirdPartyRatio}%
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
@@ -331,7 +329,17 @@ const CookieScoringComponent: React.FC = () => {
       {activeTab === 'website' && websiteScoring && (
         <div className="website-scoring">
           <div className="website-header">
-            <h3>Analysis for: {websiteScoring.website}</h3>
+            <h3>Analysis for: {websiteScoring.website || websiteScoring.pattern}</h3>
+            {websiteScoring.pattern && websiteScoring.summary?.websiteCount && websiteScoring.summary.websiteCount > 0 && (
+              <p className="pattern-info">
+                📊 Pattern matched <strong>{websiteScoring.summary.websiteCount}</strong> websites
+                {websiteScoring.websites && websiteScoring.websites.length <= 10 && (
+                  <span className="matched-websites">
+                    : {websiteScoring.websites.join(', ')}
+                  </span>
+                )}
+              </p>
+            )}
           </div>
 
           <div className="scoring-summary">
@@ -353,9 +361,15 @@ const CookieScoringComponent: React.FC = () => {
                 <div className="card-label">Under Analysis</div>
               </div>
               <div className="summary-card">
-                <div className="card-number">{websiteScoring.summary.averageScore.toFixed(1)}</div>
+                <div className="card-number">{websiteScoring.summary.averageScore ? websiteScoring.summary.averageScore.toFixed(1) : '0.0'}</div>
                 <div className="card-label">Average Score</div>
               </div>
+              {websiteScoring.summary?.websiteCount && websiteScoring.summary.websiteCount > 0 && (
+                <div className="summary-card">
+                  <div className="card-number">{websiteScoring.summary.websiteCount}</div>
+                  <div className="card-label">Websites</div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -365,17 +379,17 @@ const CookieScoringComponent: React.FC = () => {
                 <thead>
                   <tr>
                     <th>Cookie Name</th>
-                    <th>Score</th>
-                    <th>Confidence</th>
-                    <th>Source</th>
+                    <th className="tooltip-header" title="Score based on detection method (JS=3, HTTP=1, Browser=0.5) + third-party bonus (+2) + pattern bonus + occurrence multiplier">Score</th>
+                    <th className="tooltip-header" title="High: Score ≥8 or pattern match with score ≥5 | Medium: Score ≥4 or pattern match with score ≥2 | Low: All others">Confidence</th>
+                    <th className="tooltip-header" title="Detection method: JavaScript (highest confidence), HTTP headers, or Browser storage">Source</th>
                     <th>Origin</th>
                     <th>Attribution</th>
-                    <th>Third-Party</th>
+                    <th className="tooltip-header" title="Whether this cookie was detected as third-party (from external domain) or first-party (same domain)">Third-Party</th>
                   </tr>
                 </thead>
                 <tbody>
                   {websiteScoring.cookies.map((cookie, index) => (
-                    <tr key={`${cookie.name}-${cookie.id}`} className={`confidence-${cookie.scoring.confidence}`}>
+                    <tr key={`${cookie.name}-${cookie.id}`}>
                       <td className="cookie-name-cell" title={cookie.name}>
                         <strong>{cookie.name}</strong>
                       </td>
@@ -395,8 +409,8 @@ const CookieScoringComponent: React.FC = () => {
                         </span>
                       </td>
                       <td className="origin-cell" title={cookie.origin}>
-                        {cookie.origin.length > 40 
-                          ? cookie.origin.substring(0, 40) + '...' 
+                        {cookie.origin.length > 40
+                          ? cookie.origin.substring(0, 40) + '...'
                           : cookie.origin}
                       </td>
                       <td className="attribution-cell">

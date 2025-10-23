@@ -315,6 +315,46 @@ class Database {
     });
   }
 
+  getCookiesByWebsitePattern(pattern) {
+    return new Promise((resolve, reject) => {
+      // Convert wildcards: * -> %, ? -> _
+      const sqlPattern = pattern.replace(/\*/g, '%').replace(/\?/g, '_');
+      
+      console.log(`[Pattern Debug] Original pattern: "${pattern}" → SQL pattern: "${sqlPattern}"`);
+      
+      this.db.all(`
+        SELECT 
+          id,
+          website,
+          cookie_name as name,
+          source,
+          value,
+          origin,
+          origin_domain,
+          third_party,
+          third_party_domain,
+          timestamp,
+          created_at,
+          updated_at
+        FROM cookies 
+        WHERE website LIKE ? 
+        ORDER BY website, updated_at DESC
+      `, [sqlPattern], (err, rows) => {
+        if (err) {
+          console.error(`[Pattern Debug] SQL Error for pattern "${sqlPattern}":`, err);
+          reject(err);
+        } else {
+          console.log(`[Pattern Debug] Pattern "${sqlPattern}" matched ${rows.length} cookies from ${new Set(rows.map(r => r.website)).size} websites`);
+          if (rows.length > 0) {
+            const websites = [...new Set(rows.map(r => r.website))];
+            console.log(`[Pattern Debug] Matched websites:`, websites.slice(0, 10)); // Show first 10
+          }
+          resolve(rows);
+        }
+      });
+    });
+  }
+
   // Get all cookies with optional filtering
   getAllCookies(limit = 100, offset = 0) {
     return new Promise((resolve, reject) => {

@@ -26,6 +26,19 @@
   margin-bottom: 30px;
 }
 
+.wildcard-help {
+  margin-top: 8px;
+  color: #6c757d;
+}
+
+.wildcard-help code {
+  background: #e9ecef;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+}
+
 .form-group {
   display: flex;
   gap: 10px;
@@ -219,6 +232,7 @@
   margin: 0;
   background: #f8f9fa;
   border-bottom: 1px solid #e9ecef;
+  color: #333;
 }
 
 .table-wrapper {
@@ -228,78 +242,70 @@
 .scoring-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
 }
 
 .scoring-table th {
   background: #f8f9fa;
-  padding: 8px;
+  padding: 12px;
   text-align: left;
   font-weight: 600;
-  color: #2c3e50;
-  border-bottom: 2px solid #e9ecef;
+  color: #333;
+  border-bottom: 1px solid #ddd;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .scoring-table td {
-  padding: 8px;
-  border-bottom: 1px solid #e9ecef;
-  font-size: 13px;
+  padding: 12px;
+  border-bottom: 1px solid #eee;
+  font-size: 14px;
+  vertical-align: top;
 }
 
-/* Column width controls */
+/* Column styling */
 .cookie-name-cell {
-  width: 180px;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 150px;
 }
 
 .cookie-name-cell strong {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .score-cell {
-  width: 60px;
   text-align: center;
+  min-width: 80px;
 }
 
 .confidence-cell {
-  width: 100px;
+  min-width: 140px;
 }
 
 .source-cell {
-  width: 80px;
+  min-width: 80px;
 }
 
 .origin-cell {
-  width: 200px;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 150px;
+  word-break: break-word;
 }
 
 .attribution-cell {
-  width: 150px;
+  min-width: 120px;
 }
 
 .third-party-cell {
-  width: 120px;
+  min-width: 120px;
 }
 
 .occurrences-cell {
-  width: 80px;
   text-align: center;
+  min-width: 80px;
 }
 
 .websites-cell {
-  width: 80px;
   text-align: center;
+  min-width: 80px;
 }
 
 .scoring-table tr:hover {
@@ -317,25 +323,28 @@
 }
 
 .confidence-badge {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+  display: inline-block;
 }
 
 .confidence-badge.high {
-  background: #d5f4e6;
-  color: #27ae60;
+  background-color: #55a3ff;
+  color: white;
 }
 
 .confidence-badge.medium {
-  background: #fef9e7;
-  color: #f39c12;
+  background-color: #fdcb6e;
+  color: #e17055;
 }
 
 .confidence-badge.low {
-  background: #fdf2f2;
-  color: #e74c3c;
+  background-color: #ffeaa7;
+  color: #d63031;
 }
 
 .source-badge {
@@ -395,49 +404,42 @@
 
 .website-header h3 {
   color: #2c3e50;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 
-/* Responsive design for smaller screens */
-@media (max-width: 1200px) {
-  .cookie-name-cell {
-    width: 150px;
-    max-width: 150px;
-  }
-  
-  .origin-cell {
-    width: 150px;
-    max-width: 150px;
-  }
-  
-  .attribution-cell {
-    width: 120px;
-  }
+.pattern-info {
+  color: #6c757d;
+  font-size: 14px;
+  margin: 0 0 20px 0;
 }
 
+.matched-websites {
+  font-weight: normal;
+  color: #495057;
+}
+
+.tooltip-header {
+  border-bottom: 1px dotted #999 !important;
+  cursor: help;
+}
+
+/* Responsive design */
 @media (max-width: 768px) {
+  .cookies-table-container {
+    overflow-x: auto;
+  }
+  
+  .scoring-table {
+    min-width: 800px;
+  }
+  
   .scoring-table th,
   .scoring-table td {
-    padding: 6px;
+    padding: 8px;
     font-size: 12px;
-  }
-  
-  .cookie-name-cell {
-    width: 120px;
-    max-width: 120px;
-  }
-  
-  .origin-cell {
-    width: 100px;
-    max-width: 100px;
-  }
-  
-  .attribution-cell {
-    width: 100px;
   }
   
   .attribution-domain {
     font-size: 10px;
-    max-width: 90px;
   }
 }

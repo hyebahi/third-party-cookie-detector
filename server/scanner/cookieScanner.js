@@ -1,6 +1,7 @@
 const { chromium } = require('playwright');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../database/db');
+const cookiePatterns = require('../database/cookiePatterns');
 const fs = require('fs');
 
 class CookieScanner {
@@ -154,6 +155,27 @@ class CookieScanner {
     const seg = stack.match(/cdn\.segment\.com\/analytics\.js\/v1\/([^/]+)\//i);
     if (seg) return `Segment:${seg[1]}`;
 
+    return null;
+  }
+
+  /** ---------- Pattern-based third-party detection ---------- */
+  async getThirdPartyDomainFromPatterns(cookieName) {
+    try {
+      const matchedPatterns = await cookiePatterns.matchCookiePatterns(cookieName);
+      if (matchedPatterns.length > 0) {
+        // Use the highest scoring pattern for third-party determination
+        const bestPattern = matchedPatterns.reduce((best, current) =>
+          current.score_bonus > best.score_bonus ? current : best
+        );
+
+        // If the pattern has a root domain that's not 'unknown', it's third-party
+        if (bestPattern.root_domain && bestPattern.root_domain !== 'unknown') {
+          return bestPattern.root_domain;
+        }
+      }
+    } catch (error) {
+      console.warn(`Error checking patterns for ${cookieName}:`, error.message);
+    }
     return null;
   }
 
@@ -599,7 +621,7 @@ class CookieScanner {
 
     const browserCookies = await this.context.cookies();
 
-    return this.processResults(url, jsLogs, httpEvents, browserCookies, networkRequests, scriptGraph, cookieCreationStacks);
+    return await this.processResults(url, jsLogs, httpEvents, browserCookies, networkRequests, scriptGraph, cookieCreationStacks);
   }
 
   async robustGoto(url) {
@@ -635,7 +657,7 @@ class CookieScanner {
     throw e;
   }
 
-  processResults(url, jsLogs, httpEvents, browserCookies, networkRequests, scriptGraph, cookieCreationStacks) {
+  async processResults(url, jsLogs, httpEvents, browserCookies, networkRequests, scriptGraph, cookieCreationStacks) {
 
     const cookies = [];
     const cookieFirstSeen = new Map(); // Track first occurrence of each cookie
@@ -766,11 +788,35 @@ class CookieScanner {
 
         // Only add row if this is the first time we see this cookie name
         if (!cookieFirstSeen.has(name)) {
-          const thirdPartyDomain = getThirdPartyDomain(origin);
+          let thirdPartyDomain = getThirdPartyDomain(origin);
+          let isThirdParty = !!thirdPartyDomain;
 
-          // Use only network-detected third-party domains
-          // Do NOT override with simple domain extraction from origin
-          const finalThirdPartyDomain = thirdPartyDomain;
+          // Pattern-based third-party detection
+          if (!thirdPartyDomain) {
+            thirdPartyDomain = await this.getThirdPartyDomainFromPatterns(name);
+            isThirdParty = !!thirdPartyDomain;
+          }
+
+          // Domain-based fallback for JS cookies
+          if (!thirdPartyDomain && origin && origin !== 'inline/unknown') {
+            try {
+              const originUrl = new URL(origin.split(':').slice(0, -2).join(':') || origin);
+              const originDomain = originUrl.hostname;
+              const mainDomain = new URL(url).hostname;
+
+              // Remove 'www.' prefix for comparison
+              const cleanOriginDomain = originDomain.replace(/^www\./, '');
+              const cleanMainDomain = mainDomain.replace(/^www\./, '');
+
+              // If domains are different, it's third-party
+              if (cleanOriginDomain !== cleanMainDomain) {
+                thirdPartyDomain = originDomain;
+                isThirdParty = true;
+              }
+            } catch (e) {
+              // If URL parsing fails, continue without third-party detection
+            }
+          }
 
           cookieFirstSeen.set(name, { source: 'JS', origin, via });
           cookies.push({
@@ -778,8 +824,8 @@ class CookieScanner {
             value: this.valuePreview(value), // Will be updated later with latest value
             source: 'javascript',
             origin,
-            thirdParty: !!finalThirdPartyDomain,
-            thirdPartyDomain: finalThirdPartyDomain || null,
+            thirdParty: isThirdParty,
+            thirdPartyDomain: thirdPartyDomain || null,
             timestamp: log.ts || Date.now()
           });
 
@@ -796,14 +842,22 @@ class CookieScanner {
 
             // Only add row if this is the first time we see this cookie name
             if (!cookieFirstSeen.has(name)) {
-              const thirdPartyDomain = getThirdPartyDomain(origin);
+              let thirdPartyDomain = getThirdPartyDomain(origin);
+              let isThirdParty = !!thirdPartyDomain;
+
+              // Pattern-based third-party detection
+              if (!thirdPartyDomain) {
+                thirdPartyDomain = await this.getThirdPartyDomainFromPatterns(name);
+                isThirdParty = !!thirdPartyDomain;
+              }
+
               cookieFirstSeen.set(name, { source: 'JS', origin, via });
               cookies.push({
                 name,
                 value: this.valuePreview(value),
                 source: 'javascript',
                 origin,
-                thirdParty: !!thirdPartyDomain,
+                thirdParty: isThirdParty,
                 thirdPartyDomain: thirdPartyDomain || null,
                 timestamp: log.ts || Date.now()
               });
@@ -848,14 +902,22 @@ class CookieScanner {
 
             // Only add row if this is the first time we see this cookie name
             if (!cookieFirstSeen.has(cookieName)) {
-              const thirdPartyDomain = getThirdPartyDomain(origin);
+              let thirdPartyDomain = getThirdPartyDomain(origin);
+              let isThirdParty = !!thirdPartyDomain;
+
+              // Pattern-based third-party detection
+              if (!thirdPartyDomain) {
+                thirdPartyDomain = await this.getThirdPartyDomainFromPatterns(cookieName);
+                isThirdParty = !!thirdPartyDomain;
+              }
+
               cookieFirstSeen.set(cookieName, { source: 'JS', origin, via });
               cookies.push({
                 name: cookieName,
                 value: this.valuePreview(cookieValue || ''),
                 source: 'javascript',
                 origin,
-                thirdParty: !!thirdPartyDomain,
+                thirdParty: isThirdParty,
                 thirdPartyDomain: thirdPartyDomain || null,
                 timestamp: log.ts || Date.now()
               });
@@ -1013,14 +1075,39 @@ class CookieScanner {
 
         // Only add browser cookies that weren't already captured during creation
         if (!cookieFirstSeen.has(c.name)) {
-          const thirdPartyDomain = getThirdPartyDomain(originStr);
+          let thirdPartyDomain = getThirdPartyDomain(originStr);
+          let isThirdParty = !!thirdPartyDomain;
+
+          // Pattern-based third-party detection
+          if (!thirdPartyDomain) {
+            thirdPartyDomain = await this.getThirdPartyDomainFromPatterns(c.name);
+            isThirdParty = !!thirdPartyDomain;
+          }
+
+          // Domain-based fallback for browser cookies
+          if (!thirdPartyDomain && c.domain) {
+            try {
+              const cookieDomain = c.domain.replace(/^\./, '');
+              const mainDomain = new URL(url).hostname;
+              const cleanCookieDomain = cookieDomain.replace(/^www\./, '');
+              const cleanMainDomain = mainDomain.replace(/^www\./, '');
+
+              if (cleanCookieDomain !== cleanMainDomain) {
+                thirdPartyDomain = cookieDomain;
+                isThirdParty = true;
+              }
+            } catch (e) {
+              // Continue without third-party detection if parsing fails
+            }
+          }
+
           cookieFirstSeen.set(c.name, { source: 'Browser', origin: originStr, via: 'context.cookies()' });
           cookies.push({
             name: c.name,
             value: this.valuePreview(c.value || ''),
             source: 'browser',
             origin: originStr,
-            thirdParty: !!thirdPartyDomain,
+            thirdParty: isThirdParty,
             thirdPartyDomain: thirdPartyDomain || null,
             timestamp: Date.now()
           });

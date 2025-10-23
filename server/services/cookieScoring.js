@@ -1,14 +1,15 @@
 const db = require('../database/db');
+const cookiePatterns = require('../database/cookiePatterns');
 
 class CookieScoring {
   constructor() {
-    // No hardcoded patterns - we'll rely on data-driven scoring
+    // No hardcoded patterns - we'll rely on data-driven scoring from database
   }
 
   /**
-   * Calculate score for a single cookie based on detection method and occurrence patterns
+   * Calculate score for a single cookie based on detection method, occurrence patterns, and configured patterns
    */
-  calculateCookieScore(cookie, occurrenceData = null) {
+  async calculateCookieScore(cookie, occurrenceData = null) {
     let baseScore = 0;
     let confidence = 'low';
 
@@ -33,6 +34,34 @@ class CookieScoring {
       thirdPartyBonus = 2; // Standard third-party bonus
     }
 
+    // Pattern-based scoring bonus and domain attribution
+    let patternBonus = 0;
+    let patternConfidence = 'low';
+    let matchedPatterns = [];
+    let patternDomain = null;
+    
+    try {
+      const patterns = await cookiePatterns.matchCookiePatterns(cookie.name);
+      if (patterns.length > 0) {
+        // Use the highest scoring pattern
+        const bestPattern = patterns.reduce((best, current) => 
+          current.score_bonus > best.score_bonus ? current : best
+        );
+        
+        patternBonus = bestPattern.score_bonus;
+        patternConfidence = bestPattern.confidence_level;
+        matchedPatterns = patterns;
+        patternDomain = bestPattern.root_domain;
+        
+        // If pattern confidence is higher than current, upgrade it
+        if (patternConfidence === 'high' && confidence !== 'high') {
+          confidence = 'medium'; // Upgrade but don't override other factors
+        }
+      }
+    } catch (error) {
+      console.warn('Error matching cookie patterns:', error.message);
+    }
+
     // Occurrence multiplier (logarithmic scaling)
     let occurrenceMultiplier = 1;
     if (occurrenceData && occurrenceData.count > 1) {
@@ -40,15 +69,28 @@ class CookieScoring {
     }
 
     // Calculate final score
-    const finalScore = (baseScore + thirdPartyBonus) * occurrenceMultiplier;
+    const finalScore = (baseScore + thirdPartyBonus + patternBonus) * occurrenceMultiplier;
 
-    // Determine confidence level based on score
-    if (finalScore >= 8) {
+    // Determine confidence level based on score and patterns
+    if (finalScore >= 8 || (patternConfidence === 'high' && finalScore >= 5)) {
       confidence = 'high';
-    } else if (finalScore >= 4) {
+    } else if (finalScore >= 4 || (patternConfidence === 'medium' && finalScore >= 2)) {
       confidence = 'medium';
     } else {
       confidence = 'low';
+    }
+
+    // Determine the best origin domain - prioritize pattern domain over attribution
+    let originDomain = 'unknown';
+    if (patternDomain && patternDomain !== 'unknown') {
+      // Pattern domain takes highest priority
+      originDomain = patternDomain;
+    } else if (cookie.third_party_domain) {
+      // Third-party domain from detection
+      originDomain = this.extractRootDomain(cookie.third_party_domain);
+    } else if (cookie.origin) {
+      // Extract from origin as fallback
+      originDomain = this.extractRootDomain(this.extractDomainFromOrigin(cookie.origin)) || 'unknown';
     }
 
     return {
@@ -57,20 +99,63 @@ class CookieScoring {
       breakdown: {
         baseScore,
         thirdPartyBonus,
+        patternBonus,
         occurrenceMultiplier,
-        occurrenceCount: occurrenceData?.count || 1
+        occurrenceCount: occurrenceData?.count || 1,
+        matchedPatterns: matchedPatterns.map(p => ({
+          name: p.pattern_name,
+          pattern: p.cookie_pattern,
+          matchType: p.match_type,
+          domain: p.root_domain,
+          bonus: p.score_bonus
+        })),
+        patternDomainUsed: !!patternDomain
       },
       cookieName: cookie.name,
-      originDomain: this.extractRootDomain(cookie.third_party_domain) || this.extractRootDomain(this.extractDomainFromOrigin(cookie.origin)) || 'unknown'
+      originDomain
     };
   }
 
 
 
   /**
-   * Calculate attribution probability based on origin analysis
+   * Calculate attribution probability based on origin analysis, with pattern-based override
    */
-  calculateAttributionProbability(cookieName, origins) {
+  async calculateAttributionProbability(cookieName, origins) {
+    // First, check if we have a pattern match that can provide definitive attribution
+    try {
+      const patterns = await cookiePatterns.matchCookiePatterns(cookieName);
+      if (patterns.length > 0) {
+        // Use the highest scoring pattern for attribution
+        const bestPattern = patterns.reduce((best, current) => 
+          current.score_bonus > best.score_bonus ? current : best
+        );
+        
+        return {
+          probability: 100,
+          primaryOrigin: bestPattern.root_domain,
+          confidence: 'high',
+          analysis: `Pattern-based attribution: ${bestPattern.pattern_name}`,
+          patternBased: true,
+          matchedPattern: {
+            name: bestPattern.pattern_name,
+            pattern: bestPattern.cookie_pattern,
+            domain: bestPattern.root_domain
+          }
+        };
+      }
+    } catch (error) {
+      console.warn('Error checking patterns for attribution:', error.message);
+    }
+
+    // Fall back to origin-based attribution
+    return this.calculateOriginBasedAttribution(cookieName, origins);
+  }
+
+  /**
+   * Calculate attribution probability based purely on origin analysis
+   */
+  calculateOriginBasedAttribution(cookieName, origins) {
     if (!origins || origins.length === 0) {
       return {
         probability: 0,
@@ -234,6 +319,88 @@ class CookieScoring {
   }
 
   /**
+   * Score all cookies matching a website pattern
+   */
+  async scoreWebsitePattern(pattern) {
+    try {
+      console.log(`[scoreWebsitePattern] Starting pattern analysis for: "${pattern}"`);
+      
+      // Get all cookies matching the pattern
+      const cookies = await db.getCookiesByWebsitePattern(pattern);
+      
+      console.log(`[scoreWebsitePattern] Database returned ${cookies.length} cookies`);
+
+      if (cookies.length === 0) {
+        return {
+          pattern,
+          websites: [],
+          cookies: [],
+          summary: {
+            total: 0,
+            highConfidence: 0,
+            mediumConfidence: 0,
+            lowConfidence: 0,
+            thirdParty: 0,
+            averageScore: 0,
+            websiteCount: 0
+          }
+        };
+      }
+
+      // Get occurrence data for the pattern
+      const cookieOccurrences = await this.getCookieOccurrencesPattern(pattern);
+
+      // Get unique websites
+      const websites = [...new Set(cookies.map(c => c.website))];
+
+      // Score each cookie (deduplicate by name)
+      const uniqueCookies = new Map();
+      cookies.forEach(cookie => {
+        if (!uniqueCookies.has(cookie.name)) {
+          uniqueCookies.set(cookie.name, cookie);
+        }
+      });
+
+      const scoredCookies = await Promise.all(Array.from(uniqueCookies.values()).map(async cookie => {
+        const occurrenceData = cookieOccurrences[cookie.name];
+        const scoring = await this.calculateCookieScore(cookie, occurrenceData);
+
+        return {
+          ...cookie,
+          scoring,
+          attribution: await this.calculateAttributionProbability(
+            cookie.name,
+            occurrenceData?.origins || [{ origin: cookie.origin }]
+          ),
+          websiteCount: occurrenceData?.websites?.length || 1,
+          websites: occurrenceData?.websites || [cookie.website]
+        };
+      }));
+
+      // Sort by score (highest first)
+      scoredCookies.sort((a, b) => b.scoring.score - a.scoring.score);
+
+      return {
+        pattern,
+        websites,
+        cookies: scoredCookies,
+        summary: {
+          total: scoredCookies.length,
+          highConfidence: scoredCookies.filter(c => c.scoring.confidence === 'high').length,
+          mediumConfidence: scoredCookies.filter(c => c.scoring.confidence === 'medium').length,
+          lowConfidence: scoredCookies.filter(c => c.scoring.confidence === 'low').length,
+          thirdParty: scoredCookies.filter(c => c.third_party).length,
+          averageScore: scoredCookies.length > 0 ? scoredCookies.reduce((sum, c) => sum + c.scoring.score, 0) / scoredCookies.length : 0,
+          websiteCount: websites.length
+        }
+      };
+    } catch (error) {
+      console.error('Error scoring website pattern cookies:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Score all cookies for a website with occurrence data
    */
   async scoreWebsiteCookies(website) {
@@ -245,19 +412,19 @@ class CookieScoring {
       const cookieOccurrences = await this.getCookieOccurrences(website);
 
       // Score each cookie
-      const scoredCookies = cookies.map(cookie => {
+      const scoredCookies = await Promise.all(cookies.map(async cookie => {
         const occurrenceData = cookieOccurrences[cookie.name];
-        const scoring = this.calculateCookieScore(cookie, occurrenceData);
+        const scoring = await this.calculateCookieScore(cookie, occurrenceData);
 
         return {
           ...cookie,
           scoring,
-          attribution: this.calculateAttributionProbability(
+          attribution: await this.calculateAttributionProbability(
             cookie.name,
             occurrenceData?.origins || [{ origin: cookie.origin }]
           )
         };
-      });
+      }));
 
       // Sort by score (highest first)
       scoredCookies.sort((a, b) => b.scoring.score - a.scoring.score);
@@ -271,13 +438,71 @@ class CookieScoring {
           mediumConfidence: scoredCookies.filter(c => c.scoring.confidence === 'medium').length,
           lowConfidence: scoredCookies.filter(c => c.scoring.confidence === 'low').length,
           thirdParty: scoredCookies.filter(c => c.third_party).length,
-          averageScore: scoredCookies.reduce((sum, c) => sum + c.scoring.score, 0) / scoredCookies.length
+          averageScore: scoredCookies.length > 0 ? scoredCookies.reduce((sum, c) => sum + c.scoring.score, 0) / scoredCookies.length : 0
         }
       };
     } catch (error) {
       console.error('Error scoring website cookies:', error);
       throw error;
     }
+  }
+
+  /**
+   * Get occurrence data for cookies matching a website pattern
+   */
+  async getCookieOccurrencesPattern(pattern) {
+    return new Promise((resolve, reject) => {
+      // Convert wildcards: * -> %, ? -> _
+      const sqlPattern = pattern.replace(/\*/g, '%').replace(/\?/g, '_');
+      
+      const query = `
+        SELECT 
+          cookie_name,
+          COUNT(*) as count,
+          GROUP_CONCAT(origin) as origins,
+          GROUP_CONCAT(third_party) as third_parties,
+          GROUP_CONCAT(third_party_domain) as third_party_domains,
+          GROUP_CONCAT(source) as sources,
+          MIN(created_at) as first_seen,
+          MAX(updated_at) as last_seen,
+          GROUP_CONCAT(DISTINCT website) as websites
+        FROM cookies 
+        WHERE website LIKE ? 
+        GROUP BY cookie_name
+      `;
+
+      db.db.all(query, [sqlPattern], (err, rows) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        const occurrences = {};
+        rows.forEach(row => {
+          const origins = row.origins ? row.origins.split(',') : [];
+          const thirdParties = row.third_parties ? row.third_parties.split(',') : [];
+          const thirdPartyDomains = row.third_party_domains ? row.third_party_domains.split(',') : [];
+          
+          // Combine origin data with third-party information
+          const originsWithThirdParty = origins.map((origin, index) => ({
+            origin: origin,
+            isThirdParty: thirdParties[index] === '1',
+            thirdPartyDomain: thirdPartyDomains[index] !== 'null' ? thirdPartyDomains[index] : null
+          }));
+          
+          occurrences[row.cookie_name] = {
+            count: row.count,
+            origins: originsWithThirdParty,
+            sources: row.sources ? row.sources.split(',') : [],
+            firstSeen: row.first_seen,
+            lastSeen: row.last_seen,
+            websites: row.websites ? row.websites.split(',') : []
+          };
+        });
+
+        resolve(occurrences);
+      });
+    });
   }
 
   /**
@@ -355,13 +580,13 @@ class CookieScoring {
         ORDER BY total_occurrences DESC
       `;
 
-      db.db.all(query, [], (err, rows) => {
+      db.db.all(query, [], async (err, rows) => {
         if (err) {
           reject(err);
           return;
         }
 
-        const stats = rows.map(row => {
+        const stats = await Promise.all(rows.map(async row => {
           // Get all origins for this cookie to calculate proper attribution
           const origins = row.origins ? row.origins.split(',') : [];
           const thirdParties = row.third_parties ? row.third_parties.split(',') : [];
@@ -375,7 +600,7 @@ class CookieScoring {
           }));
 
           // Calculate attribution to find the primary origin
-          const attribution = this.calculateAttributionProbability(row.cookie_name, originsWithThirdParty);
+          const attribution = await this.calculateAttributionProbability(row.cookie_name, originsWithThirdParty);
 
           const mockCookie = {
             name: row.cookie_name,
@@ -385,10 +610,17 @@ class CookieScoring {
             origin: attribution.primaryOrigin || 'unknown'
           };
 
-          const scoring = this.calculateCookieScore(mockCookie, { count: row.total_occurrences });
+          const scoring = await this.calculateCookieScore(mockCookie, { count: row.total_occurrences });
 
-          // Override the originDomain with the primary attribution
-          scoring.originDomain = attribution.primaryOrigin || 'unknown';
+          // If no pattern domain was used, fall back to attribution logic
+          if (!scoring.breakdown.patternDomainUsed) {
+            // Only override if attribution gives us a better result than "multiple-origins"
+            if (attribution.primaryOrigin && 
+                attribution.primaryOrigin !== 'unknown' && 
+                attribution.primaryOrigin !== 'multiple-origins') {
+              scoring.originDomain = attribution.primaryOrigin;
+            }
+          }
 
           return {
             cookieName: row.cookie_name,
@@ -400,7 +632,7 @@ class CookieScoring {
             originDomains: row.origin_domains ? row.origin_domains.split(',') : [],
             attribution
           };
-        });
+        }));
 
         resolve(stats);
       });

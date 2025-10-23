@@ -6,6 +6,7 @@ require('dotenv').config();
 const scanRoutes = require('./routes/scan');
 const resultsRoutes = require('./routes/results');
 const scoringRoutes = require('./routes/scoring');
+const patternsRoutes = require('./routes/patterns');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -18,6 +19,7 @@ app.use(express.json());
 app.use('/api/scan', scanRoutes);
 app.use('/api/results', resultsRoutes);
 app.use('/api/scoring', scoringRoutes);
+app.use('/api/patterns', patternsRoutes);
 
 // Serve static files from React build
 if (process.env.NODE_ENV === 'production') {

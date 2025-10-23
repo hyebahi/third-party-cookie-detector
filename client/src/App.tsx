@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 import CookieScoring from './components/CookieScoring';
+import CookiePatterns from './components/CookiePatterns';
 
 interface Cookie {
   id: number;
@@ -34,7 +35,7 @@ function App() {
   const [allCookies, setAllCookies] = useState<Cookie[]>([]);
   const [recentScans, setRecentScans] = useState<Scan[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'scanner' | 'scoring'>('scanner');
+  const [activeTab, setActiveTab] = useState<'scanner' | 'scoring' | 'patterns'>('scanner');
 
   const fetchAllData = async () => {
     try {
@@ -257,6 +258,12 @@ function App() {
           >
             🎯 Scoring
           </button>
+          <button 
+            className={`nav-tab ${activeTab === 'patterns' ? 'active' : ''}`}
+            onClick={() => setActiveTab('patterns')}
+          >
+            ⚙️ Patterns
+          </button>
         </nav>
       </header>
 
@@ -264,6 +271,8 @@ function App() {
         <div className="container">
           {activeTab === 'scoring' ? (
             <CookieScoring />
+          ) : activeTab === 'patterns' ? (
+            <CookiePatterns />
           ) : (
             <>
               {/* Scan Form */}
