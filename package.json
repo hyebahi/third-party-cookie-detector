@@ -1,16 +1,43 @@
 {
-  "name": "playwright",
+  "name": "cookie-scanner-api",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Cookie detection and analysis API with frontend",
+  "main": "server/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "run": "node index.js"
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "server:dev": "nodemon server/index.js",
+    "client:dev": "cd client && npm start",
+    "build": "cd client && npm run build",
+    "start": "node server/index.js",
+    "install:all": "npm install && cd client && npm install",
+    "db:init": "node server/scripts/initDb.js",
+    "db:migrate": "node server/scripts/migrateDb.js",
+    "db:clean": "node server/scripts/cleanDb.js",
+    "test:api": "node test-api.js",
+    "scan": "node console-scanner.js",
+    "scan:visible": "HEADLESS=false node console-scanner.js",
+    "scan:original": "node index.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "playwright": "^1.56.0"
-  }
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-fetch": "^2.7.0",
+    "playwright": "^1.56.0",
+    "sqlite3": "^5.1.6",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "cookies",
+    "privacy",
+    "tracking",
+    "playwright",
+    "scanner"
+  ],
+  "author": "",
+  "license": "ISC"
 }

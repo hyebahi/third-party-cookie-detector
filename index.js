@@ -257,6 +257,20 @@ function detectThirdPartyServices(networkRequests) {
       timestamp: evt.timestamp
     });
     
+    // Check for Facebook-related requests
+    const url = evt.request.url.toLowerCase();
+    const isFacebookRequest = ['facebook.com', 'facebook.net', 'fbcdn.net', 'connect.facebook.net']
+      .some(domain => url.includes(domain)) || 
+      ['fbevents', 'fbq', 'pixel', '_fbp', '_fbc'].some(pattern => url.includes(pattern));
+    
+    if (isFacebookRequest) {
+      console.log(`[Facebook Tracker] 📡 Facebook request detected: ${evt.request.method} ${evt.request.url}`);
+      if (evt.initiator?.stack?.callFrames?.length) {
+        const topFrame = evt.initiator.stack.callFrames[0];
+        console.log(`[Facebook Tracker] Initiated from: ${topFrame.url}:${topFrame.lineNumber}`);
+      }
+    }
+    
     if (requestCount % 10 === 0) {
       console.log(`[CDP] Processed ${requestCount} requests`);
     }
@@ -342,6 +356,41 @@ function detectThirdPartyServices(networkRequests) {
   await page.addInitScript((detectorsSrc) => {
     // Deserialize detectors on the page side
     const DETECTORS = new Map(detectorsSrc);
+    
+    // Enhanced Facebook pixel tracking
+    const FACEBOOK_DOMAINS = ['facebook.com', 'facebook.net', 'fbcdn.net', 'connect.facebook.net'];
+    const FACEBOOK_COOKIES = ['_fbp', '_fbc', 'fr', 'datr', 'sb', 'c_user', 'xs'];
+    const FACEBOOK_PATTERNS = ['fbevents', 'facebook', 'fbq', 'pixel', '_fbp', '_fbc'];
+    
+    console.log('[Facebook Tracker] Initialized Facebook pixel detection');
+    
+    // Monitor for Facebook Pixel API calls
+    if (window.fbq) {
+      console.log('[Facebook Tracker] 🎯 Facebook Pixel (fbq) already loaded!');
+    }
+    
+    // Override fbq if it gets loaded
+    const originalFbq = window.fbq;
+    Object.defineProperty(window, 'fbq', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return this._fbq;
+      },
+      set(value) {
+        console.log('[Facebook Tracker] 🎯 Facebook Pixel (fbq) being set!', typeof value);
+        if (typeof value === 'function') {
+          this._fbq = new Proxy(value, {
+            apply(target, thisArg, argumentsList) {
+              console.log('[Facebook Tracker] 🎯 fbq() called with:', argumentsList);
+              return target.apply(thisArg, argumentsList);
+            }
+          });
+        } else {
+          this._fbq = value;
+        }
+      }
+    });
 
     // Enhanced shared store
     window.__cookieMvp = {
@@ -351,6 +400,8 @@ function detectThirdPartyServices(networkRequests) {
       initialCookies: new Set(), // Track cookies present at instrumentation time
       periodicSnapshots: [], // Periodic cookie snapshots to detect delayed creation
       cookieCreationStacks: new Map(), // cookieName -> detailed stack info
+      resourceChain: [], // Track resource loading chain for attribution
+      facebookEvents: [], // Specific tracking for Facebook-related events
     };
 
     // Capture initial cookie state to compare against later
@@ -427,6 +478,30 @@ function detectThirdPartyServices(networkRequests) {
         cookieName = extraInfo.cookieName;
       }
       
+      // Check if this is a Facebook cookie
+      const isFacebookCookie = FACEBOOK_COOKIES.includes(cookieName);
+      if (isFacebookCookie) {
+        console.log(`[Facebook Tracker] 🎯 Facebook cookie detected: ${cookieName}`);
+        console.log(`[Facebook Tracker] Stack trace:`, stack);
+        
+        // Analyze the resource chain for Facebook attribution
+        const recentFacebookResources = window.__cookieMvp.resourceChain
+          .filter(r => r.timestamp > Date.now() - 10000) // Last 10 seconds
+          .filter(r => FACEBOOK_DOMAINS.some(domain => r.url.includes(domain)) || 
+                      r.url.includes('facebook') || r.url.includes('fbevents'));
+        
+        console.log(`[Facebook Tracker] Recent Facebook resources:`, recentFacebookResources);
+        
+        window.__cookieMvp.facebookEvents.push({
+          cookieName,
+          via,
+          payload: cookieOrArgs,
+          stack,
+          recentFacebookResources,
+          timestamp: Date.now()
+        });
+      }
+      
       // Perform stack trace analysis only - no inference
       let originAnalysis = null;
       if (cookieName) {
@@ -451,6 +526,7 @@ function detectThirdPartyServices(networkRequests) {
         ts: Date.now(),
         cookieName: cookieName,
         originAnalysis: originAnalysis,
+        isFacebookCookie: isFacebookCookie,
         ...extraInfo
       });
       
@@ -540,6 +616,31 @@ function detectThirdPartyServices(networkRequests) {
     window.__cookieMvp.recentScripts = new Map(); // URL -> {timestamp, parentScript}
     window.__cookieMvp.recentIframes = new Map(); // URL -> {timestamp, parentScript}
     
+    // Enhanced resource tracking for Facebook attribution
+    const trackResource = (url, type, parentScript) => {
+      const isFacebookResource = FACEBOOK_DOMAINS.some(domain => url.includes(domain)) || 
+                                FACEBOOK_PATTERNS.some(pattern => url.toLowerCase().includes(pattern.toLowerCase()));
+      
+      const resourceInfo = {
+        url,
+        type,
+        timestamp: Date.now(),
+        parentScript,
+        isFacebookResource
+      };
+      
+      window.__cookieMvp.resourceChain.push(resourceInfo);
+      
+      if (isFacebookResource) {
+        console.log(`[Facebook Tracker] 📡 Facebook resource loaded: ${type} ${url}`);
+        console.log(`[Facebook Tracker] Parent script: ${parentScript}`);
+      }
+      
+      // Keep only recent resources (last 30 seconds)
+      const cutoff = Date.now() - 30000;
+      window.__cookieMvp.resourceChain = window.__cookieMvp.resourceChain.filter(r => r.timestamp > cutoff);
+    };
+    
     // Track script loading without recording as cookie events
     const originalAppendChild = Node.prototype.appendChild;
     Node.prototype.appendChild = function(child) {
@@ -551,11 +652,13 @@ function detectThirdPartyServices(networkRequests) {
           timestamp: Date.now(),
           parentScript: parentScript
         });
+        trackResource(child.src, 'script', parentScript);
       } else if (child.nodeName === 'IFRAME' && child.src) {
         window.__cookieMvp.recentIframes.set(child.src, {
           timestamp: Date.now(),
           parentScript: parentScript
         });
+        trackResource(child.src, 'iframe', parentScript);
       }
       return originalAppendChild.call(this, child);
     };
@@ -582,6 +685,8 @@ function detectThirdPartyServices(networkRequests) {
                 parentScript: parentScript
               });
               
+              trackResource(value, 'iframe-src', parentScript);
+              
               return originalSrcSetter.call(element, value);
             }
           });
@@ -589,6 +694,24 @@ function detectThirdPartyServices(networkRequests) {
       }
       return element;
     };
+    
+    // Track image loading (Facebook pixel tracking)
+    const originalImageSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+    if (originalImageSrc && originalImageSrc.set) {
+      Object.defineProperty(HTMLImageElement.prototype, 'src', {
+        configurable: true,
+        enumerable: true,
+        get: originalImageSrc.get,
+        set(value) {
+          const stack = new Error().stack || '';
+          const parentScript = (stack.match(/https?:\/\/[^\s)]+:\d+:\d+/) || [])[0] || 'inline/unknown';
+          
+          trackResource(value, 'image', parentScript);
+          
+          return originalImageSrc.set.call(this, value);
+        }
+      });
+    }
 
     // 5) Periodic cookie monitoring to detect changes not captured by direct instrumentation
     const takeSnapshot = () => {
@@ -804,6 +927,8 @@ function detectThirdPartyServices(networkRequests) {
 
   // Grab the instrumentation data from the page
   let cookieCreationStacks = {};
+  let facebookEvents = [];
+  let resourceChain = [];
   try {
     const resPost = await page.evaluate(() => {
       if (!window.__cookieMvp) return null;
@@ -812,6 +937,8 @@ function detectThirdPartyServices(networkRequests) {
         scriptGraph: window.__cookieMvp.scriptGraph || {},
         containerLabels: Array.from(window.__cookieMvp.containerLabels || []),
         cookieCreationStacks: Object.fromEntries(window.__cookieMvp.cookieCreationStacks || new Map()),
+        facebookEvents: window.__cookieMvp.facebookEvents || [],
+        resourceChain: window.__cookieMvp.resourceChain || [],
       };
     });
     if (resPost) {
@@ -819,10 +946,38 @@ function detectThirdPartyServices(networkRequests) {
       scriptGraph = resPost.scriptGraph || {};
       containerLabels = resPost.containerLabels || [];
       cookieCreationStacks = resPost.cookieCreationStacks || {};
+      facebookEvents = resPost.facebookEvents || [];
+      resourceChain = resPost.resourceChain || [];
       
       console.log(`Captured ${jsLogs.length} JS cookie operations and ${httpEvents.length} HTTP Set-Cookie events`);
       console.log(`[CDP Summary] Processed ${responseCount} responses (${crossOriginResponses} cross-origin), found ${setCookieCount} with Set-Cookie headers`);
       console.log(`[Origin Analysis] Analyzed ${Object.keys(cookieCreationStacks).length} cookie creation origins`);
+      console.log(`[Facebook Analysis] Captured ${facebookEvents.length} Facebook cookie events`);
+      console.log(`[Resource Chain] Tracked ${resourceChain.length} resource loads`);
+      
+      // Enhanced Facebook cookie analysis
+      if (facebookEvents.length > 0) {
+        console.log('\n=== FACEBOOK COOKIE ANALYSIS ===');
+        facebookEvents.forEach((event, i) => {
+          console.log(`\n[Facebook Event ${i + 1}] Cookie: ${event.cookieName}`);
+          console.log(`  Via: ${event.via}`);
+          console.log(`  Payload: ${event.payload}`);
+          console.log(`  Recent Facebook Resources:`);
+          event.recentFacebookResources.forEach(resource => {
+            console.log(`    - ${resource.type}: ${resource.url}`);
+            console.log(`      Parent: ${resource.parentScript}`);
+          });
+          
+          // Analyze the stack for Tealium connection
+          const stackLines = event.stack.split('\n');
+          const tealiumFrames = stackLines.filter(line => line.includes('tiqcdn.com'));
+          if (tealiumFrames.length > 0) {
+            console.log(`  Tealium Connection Found:`);
+            tealiumFrames.forEach(frame => console.log(`    ${frame.trim()}`));
+          }
+        });
+        console.log('================================\n');
+      }
       
       // Log the detailed origin analysis for debugging
       Object.entries(cookieCreationStacks).forEach(([cookieName, info]) => {
