@@ -483,3 +483,81 @@ input:checked + .toggle-slider:before {
     max-width: none;
   }
 }
+/* F
+orm sections for better organization */
+.form-section {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.form-section:first-child {
+  background: #fff;
+  border: 1px solid #dee2e6;
+}
+
+.section-title {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #495057;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+.checkbox-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 60px;
+}
+
+.checkbox-group .checkbox-label {
+  margin-bottom: 4px;
+}
+
+.checkbox-group .help-text {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+/* Enhanced help text */
+.help-text {
+  color: #6c757d;
+  font-size: 12px;
+  margin-top: 4px;
+  display: block;
+  line-height: 1.3;
+}
+
+/* Better input styling */
+.form-group input[type="number"] {
+  text-align: center;
+}
+
+.form-group select option {
+  padding: 8px;
+}
+
+/* Form section spacing */
+.pattern-form .form-section:last-of-type {
+  margin-bottom: 16px;
+}/* Make
+ description textarea wider */
+.form-section .form-group.full-width textarea {
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Ensure the description section takes full width */
+.form-section:last-of-type .form-group {
+  width: 100%;
+}

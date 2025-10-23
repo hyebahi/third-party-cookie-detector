@@ -305,105 +305,120 @@ const CookiePatterns: React.FC = () => {
         <div className="pattern-form">
           <h3>{editingPattern ? 'Edit Pattern' : 'Add New Pattern'}</h3>
           <form onSubmit={handleSubmit}>
-            <div className="form-row">
-              <div className="form-group">
+            {/* Pattern Name */}
+            <div className="form-section">
+              <div className="form-group full-width">
                 <label>Pattern Name *</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g., Google Analytics"
+                  placeholder="e.g., Google Analytics, Facebook Pixel, Adobe Analytics"
                   required
                 />
-              </div>
-              
-              <div className="form-group">
-                <label>Cookie Pattern *</label>
-                <input
-                  type="text"
-                  value={formData.pattern}
-                  onChange={(e) => setFormData({ ...formData, pattern: e.target.value })}
-                  placeholder="e.g., _ga"
-                  required
-                />
+                <small className="help-text">A friendly name to identify this cookie pattern</small>
               </div>
             </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label>Match Type *</label>
-                <select
-                  value={formData.matchType}
-                  onChange={(e) => setFormData({ ...formData, matchType: e.target.value })}
-                  required
-                >
-                  <option value="starts_with">Starts With</option>
-                  <option value="ends_with">Ends With</option>
-                  <option value="contains">Contains</option>
-                  <option value="equals">Equals</option>
-                  <option value="regex">Regex</option>
-                </select>
-              </div>
-              
-              <div className="form-group">
-                <label>Root Domain *</label>
-                <input
-                  type="text"
-                  value={formData.rootDomain}
-                  onChange={(e) => setFormData({ ...formData, rootDomain: e.target.value })}
-                  placeholder="e.g., google.com"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label>Score Bonus</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.scoreBonus}
-                  onChange={(e) => setFormData({ ...formData, scoreBonus: parseFloat(e.target.value) || 0 })}
-                  placeholder="0"
-                />
-              </div>
-              
-              <div className="form-group">
-                <label>Confidence Level</label>
-                <select
-                  value={formData.confidenceLevel}
-                  onChange={(e) => setFormData({ ...formData, confidenceLevel: e.target.value })}
-                >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="form-row">
-              <div className="form-group">
-                <label className="checkbox-label">
+            {/* Pattern Matching Rules */}
+            <div className="form-section">
+              <h4 className="section-title">Pattern Matching</h4>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Cookie Pattern *</label>
                   <input
-                    type="checkbox"
-                    checked={formData.caseSensitive}
-                    onChange={(e) => setFormData({ ...formData, caseSensitive: e.target.checked })}
+                    type="text"
+                    value={formData.pattern}
+                    onChange={(e) => setFormData({ ...formData, pattern: e.target.value })}
+                    placeholder="e.g., _ga, fbp, s_cc"
+                    required
                   />
-                  Case Sensitive Matching
-                </label>
-                <small className="help-text">When enabled, pattern matching will be case-sensitive (e.g., "GA" ≠ "ga")</small>
+                </div>
+                
+                <div className="form-group">
+                  <label>Match Type *</label>
+                  <select
+                    value={formData.matchType}
+                    onChange={(e) => setFormData({ ...formData, matchType: e.target.value })}
+                    required
+                  >
+                    <option value="contains">Contains</option>
+                    <option value="starts_with">Starts With</option>
+                    <option value="ends_with">Ends With</option>
+                    <option value="equals">Exact Match</option>
+                    <option value="regex">Regular Expression</option>
+                  </select>
+                </div>
+
+                <div className="form-group checkbox-group">
+                  <label className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={formData.caseSensitive}
+                      onChange={(e) => setFormData({ ...formData, caseSensitive: e.target.checked })}
+                    />
+                    Case Sensitive
+                  </label>
+                  <small className="help-text">Match exact case (GA ≠ ga)</small>
+                </div>
+                
+                <div className="form-group">
+                  <label>Root Domain *</label>
+                  <input
+                    type="text"
+                    value={formData.rootDomain}
+                    onChange={(e) => setFormData({ ...formData, rootDomain: e.target.value })}
+                    placeholder="e.g., google.com, facebook.com"
+                    required
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="form-group">
-              <label>Description</label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Optional description of this pattern..."
-                rows={3}
-              />
+            {/* Scoring & Confidence */}
+            <div className="form-section">
+              <h4 className="section-title">Scoring & Confidence</h4>
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Confidence Level</label>
+                  <select
+                    value={formData.confidenceLevel}
+                    onChange={(e) => setFormData({ ...formData, confidenceLevel: e.target.value })}
+                  >
+                    <option value="high">High - Very reliable match</option>
+                    <option value="medium">Medium - Good match</option>
+                    <option value="low">Low - Possible match</option>
+                  </select>
+                </div>
+                
+                <div className="form-group">
+                  <label>Score Bonus</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    value={formData.scoreBonus}
+                    onChange={(e) => setFormData({ ...formData, scoreBonus: parseFloat(e.target.value) || 0 })}
+                    placeholder="0.0"
+                  />
+                  <small className="help-text">Additional points (0-10) for this match</small>
+                </div>
+              </div>
+            </div>
+
+            {/* Description */}
+            <div className="form-section">
+              <div className="form-group full-width">
+                <label>Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  placeholder="Describe what this cookie is used for, e.g., 'Google Analytics tracking cookie for measuring website traffic and user behavior'"
+                  rows={5}
+                />
+                <small className="help-text">Optional: Explain what this cookie pattern detects</small>
+              </div>
             </div>
 
             <div className="form-actions">
